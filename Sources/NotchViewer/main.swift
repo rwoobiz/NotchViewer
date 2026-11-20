@@ -118,7 +118,8 @@ final class RemoteView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     let overlay = NSTextField(labelWithString: "")
-    private let legacyDraw = UserDefaults.standard.bool(forKey: "legacyDraw")
+    // The shared-surface path left stale pixels on screen, so the image-copy path is the default.
+    private let legacyDraw = !UserDefaults.standard.bool(forKey: "fastDraw")
     func installOverlay() {
         overlay.textColor = .white; overlay.backgroundColor = NSColor.black.withAlphaComponent(0.7); overlay.drawsBackground = true
         overlay.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -128,7 +129,7 @@ final class RemoteView: NSView {
     }
     func refresh() {
         // Default: hand the GPU the shared surface directly (no per-frame copy).
-        // `defaults write dev.notchviewer.app legacyDraw -bool true` switches back to the slower image copy.
+        // `defaults write dev.notchviewer.app fastDraw -bool true` tries the experimental shared-surface path.
         let surf: AnyObject? = legacyDraw ? client?.makeImage() : client?.displaySurface
         layer?.contents = surf
         if let c = client, !overlay.isHidden {
