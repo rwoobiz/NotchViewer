@@ -198,6 +198,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
     private let touchButton = NSButton(title: "Connect with Touch ID", target: nil, action: nil)
     private let forgetButton = NSButton(title: "Forget saved login", target: nil, action: nil)
     private let remember = NSButton(checkboxWithTitle: "Remember this login (unlock with Touch ID)", target: nil, action: nil)
+    private let spinner = NSProgressIndicator()
+    private let linkLabel = NSTextField(labelWithString: "")
+    private lazy var linkRow: NSStackView = {
+        spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
+        linkLabel.textColor = .secondaryLabelColor; linkLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        let r = NSStackView(views: [spinner, linkLabel]); r.orientation = .horizontal; r.spacing = 8
+        r.isHidden = true
+        return r
+    }()
+    /// Shows a swirl and a short message while linking; nil hides it.
+    private func setLinking(_ text: String?) {
+        if let text {
+            linkLabel.stringValue = text; linkRow.isHidden = false; spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil); linkRow.isHidden = true
+        }
+    }
     private var pendingPassword: String?
     private var lastPassword = ""
     private var retries = 0
@@ -216,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
 
     private func buildConnectWindow() {
-        connectWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 460),
+        connectWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 480),
                                  styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         connectWindow.titlebarAppearsTransparent = true
         connectWindow.titleVisibility = .hidden
@@ -225,9 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
         connectWindow.backgroundColor = .clear
         connectWindow.center()
 
-        let icon = NSImageView(image: NSImage(systemSymbolName: "display", accessibilityDescription: nil) ?? NSImage())
-        icon.symbolConfiguration = .init(pointSize: 40, weight: .light)
-        icon.contentTintColor = .labelColor
+        // Same artwork as the app icon, so the window and the Dock agree.
+        let icon = NSImageView(image: NSApp.applicationIconImage ?? NSImage())
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 96).isActive = true
         let title = NSTextField(labelWithString: "NotchViewer")
         title.font = .systemFont(ofSize: 22, weight: .semibold)
         let sub = NSTextField(labelWithString: "Your other Mac, edge to edge.")
@@ -260,7 +279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
 
         let header = NSStackView(views: [icon, title, sub])
         header.orientation = .vertical; header.spacing = 4; header.alignment = .centerX
-        let stack = NSStackView(views: [header, hostField, userField, passField, remember, status, touchButton, button, forgetButton])
+        let stack = NSStackView(views: [header, hostField, userField, passField, remember, status, linkRow, touchButton, button, forgetButton])
         stack.orientation = .vertical; stack.alignment = .centerX; stack.spacing = 12
         stack.setCustomSpacing(22, after: header)
         stack.edgeInsets = NSEdgeInsets(top: 44, left: 40, bottom: 24, right: 40)
@@ -321,7 +340,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
 
     private func startConnection(password: String) {
         let host = hostField.stringValue.trimmingCharacters(in: .whitespaces)
-        status.stringValue = ""; button.isEnabled = false; touchButton.isEnabled = false; button.title = "Connecting…"
+        status.stringValue = ""; button.isEnabled = false; touchButton.isEnabled = false; button.title = "Linking…"
+        setLinking("Linking to \(host)…")
         lastPassword = password
         let c = RFBClient(); c.delegate = self; client = c
         c.start(host: host, port: "5900", username: userField.stringValue, password: password)
@@ -332,33 +352,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
     func rfbDidConnect(width: Int, height: Int) {
         if let pw = pendingPassword, !pw.isEmpty { Keychain.save(pw, account: account) }
         pendingPassword = nil
+        setLinking("Signed in - opening the screen…")
+        // The connect window stays up (no black flash) until the first real picture has arrived.
+        if let c = client { watch(c, since: Date()) }
+    }
+
+    /// Wait for a non-black frame, then morph the connect window into the full-screen view.
+    /// Apple's server sometimes sends an all-black screen; a fresh connection usually fixes it.
+    private func watch(_ c: RFBClient, since: Date) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, c === self.client, self.viewer == nil else { return }
+            if c.updates > 0 && c.nonBlackSample() > 0 { self.presentViewer(for: c); return }
+            if c.updates > 0 && Date().timeIntervalSince(since) > 2.5 && self.retries < 4 {
+                self.retries += 1; self.retrying = true
+                RFBClient.useZRLE = self.retries < 2 // after two black tries, assume compression is the culprit
+                Log.write("black screen, reconnecting (attempt \(self.retries))")
+                c.stop(); return
+            }
+            if Date().timeIntervalSince(since) < 20 { self.watch(c, since: since) }
+        }
+    }
+
+    private func presentViewer(for c: RFBClient) {
         let screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main!
-        NSApp.presentationOptions = [.hideDock, .hideMenuBar]
-        let w = ViewerWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        let start = connectWindow.frame
+        let w = ViewerWindow(contentRect: start, styleMask: .borderless, backing: .buffered, defer: false)
         w.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-        w.backgroundColor = .black; w.isOpaque = true; w.hasShadow = false
+        w.backgroundColor = .black; w.isOpaque = false; w.hasShadow = false
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let v = RemoteView(frame: NSRect(origin: .zero, size: screen.frame.size))
-        v.client = client
+        w.alphaValue = 0
+        let v = RemoteView(frame: NSRect(origin: .zero, size: start.size))
+        v.autoresizingMask = [.width, .height]
+        v.client = c
         v.onDisconnect = { [weak self] in self?.client?.stop() }
         w.contentView = v
         w.onDisconnect = { [weak self] in self?.client?.stop() }
-        v.installOverlay()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { v.overlay.isHidden = true }
-        w.setFrame(screen.frame, display: true)
         w.acceptsMouseMovedEvents = true
+        v.refresh()
         w.makeKeyAndOrderFront(nil); w.makeFirstResponder(v)
-        connectWindow.orderOut(nil)
         viewer = w; view = v
-        // Apple's server sometimes hands out an all-black screen; a fresh connection usually fixes it.
-        let c = client
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            guard let self, let c, c === self.client, c.updates > 0, c.nonBlackSample() == 0, self.retries < 4 else { return }
-            self.retries += 1; self.retrying = true
-            RFBClient.useZRLE = self.retries < 2 // after two black tries, assume compression is the culprit
-            Log.write("black screen, reconnecting (attempt \(self.retries))")
-            c.stop()
-        }
+        // Morph: the window grows from the connect window's frame to the whole display (camera row included).
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.55
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            w.animator().setFrame(screen.frame, display: true)
+            w.animator().alphaValue = 1
+            self.connectWindow.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            NSApp.presentationOptions = [.hideDock, .hideMenuBar]
+            w.setFrame(screen.frame, display: true)
+            self.connectWindow.orderOut(nil); self.connectWindow.alphaValue = 1
+            self.setLinking(nil)
+            v.installOverlay()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { v.overlay.isHidden = true }
+        })
     }
 
     func rfbDidResize(width: Int, height: Int) { view?.refresh() }
@@ -367,12 +415,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
     func rfbDidDisconnect(error: String?) {
         if retrying {
             retrying = false
-            viewer?.orderOut(nil); viewer = nil; view = nil; client = nil
-            startConnection(password: lastPassword)
+            client = nil
+            startConnection(password: lastPassword) // connect window stays up: no flicker
             return
         }
         viewer?.orderOut(nil); viewer = nil; view = nil; client = nil
         NSApp.presentationOptions = []
+        setLinking(nil)
         button.isEnabled = true; touchButton.isEnabled = true; button.title = "Connect"; passField.stringValue = ""
         refreshSaved()
         status.stringValue = error ?? ""
