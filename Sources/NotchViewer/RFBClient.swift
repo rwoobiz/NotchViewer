@@ -18,6 +18,15 @@ protocol RFBClientDelegate: AnyObject {
 final class RFBClient {
     /// Compressed updates are much faster; falls back to Raw if a connection keeps coming up black.
     static var useZRLE = true
+    /// Colour handling: default passes the remote's pixel values straight to this display (both Macs are wide-gamut).
+    /// `defaults write dev.notchviewer.app colorSpace p3` (or `srgb`) tags the picture explicitly instead.
+    static func taggedColorSpace() -> CGColorSpace? {
+        switch UserDefaults.standard.string(forKey: "colorSpace") {
+        case "p3": return CGColorSpace(name: CGColorSpace.displayP3)
+        case "srgb": return CGColorSpace(name: CGColorSpace.sRGB)
+        default: return nil
+        }
+    }
     weak var delegate: RFBClientDelegate?
     private var fd: Int32 = -1
     private let writeLock = NSLock()
@@ -189,6 +198,7 @@ final class RFBClient {
         surface = IOSurfaceCreate(props as CFDictionary)
         if let s = surface {
             stride = IOSurfaceGetBytesPerRow(s)
+            if let cs = RFBClient.taggedColorSpace(), let plist = cs.copyPropertyList() { IOSurfaceSetValue(s, kIOSurfaceColorSpace, plist) }
             fb = IOSurfaceGetBaseAddress(s).assumingMemoryBound(to: UInt8.self)
             lockSurface(); memset(fb!, 0, stride * h); unlockSurface()
         }
@@ -447,7 +457,7 @@ final class RFBClient {
         let data = Data(bytes: fb, count: bpr * h)
         guard let provider = CGDataProvider(data: data as CFData) else { return nil }
         return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bpr,
-                       space: CGColorSpaceCreateDeviceRGB(),
+                       space: RFBClient.taggedColorSpace() ?? CGColorSpaceCreateDeviceRGB(),
                        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }

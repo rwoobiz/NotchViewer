@@ -118,6 +118,7 @@ final class RemoteView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     let overlay = NSTextField(labelWithString: "")
+    private let legacyDraw = UserDefaults.standard.bool(forKey: "legacyDraw")
     func installOverlay() {
         overlay.textColor = .white; overlay.backgroundColor = NSColor.black.withAlphaComponent(0.7); overlay.drawsBackground = true
         overlay.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -126,7 +127,9 @@ final class RemoteView: NSView {
         addSubview(overlay)
     }
     func refresh() {
-        let surf = client?.makeImage()
+        // Default: hand the GPU the shared surface directly (no per-frame copy).
+        // `defaults write dev.notchviewer.app legacyDraw -bool true` switches back to the slower image copy.
+        let surf: AnyObject? = legacyDraw ? client?.makeImage() : client?.displaySurface
         layer?.contents = surf
         if let c = client, !overlay.isHidden {
             overlay.stringValue = "NotchViewer connected \(c.width)x\(c.height)\nupdates: \(c.updates) rects: \(c.rects) lastEnc: \(c.lastEncoding)\nnon-black samples: \(c.nonBlackSample())  image: \(surf == nil ? "nil" : "ok")\nCtrl-Opt-Cmd-Q disconnects" + (c.nonBlackSample() == 0 && c.updates > 0 ? "\nAll black? Leave Username empty and use the 16\" VNC password." : "")
