@@ -67,7 +67,7 @@ final class App: NSObject, NSApplicationDelegate {
     var window: MirrorWindow?
     let capturer = Capturer()
     // Points trimmed from the top of the Screen Sharing window (its title bar); override with NOTCH_TITLEBAR.
-    let titleBar = CGFloat(Double(ProcessInfo.processInfo.environment["NOTCH_TITLEBAR"] ?? "") ?? 28)
+    let titleBar = CGFloat(Double(ProcessInfo.processInfo.environment["NOTCH_TITLEBAR"] ?? "") ?? 32)
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
