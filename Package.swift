@@ -6,5 +6,6 @@ let package = Package(
     targets: [
         .target(name: "CZlib", path: "Sources/CZlib", linkerSettings: [.linkedLibrary("z")]),
         .executableTarget(name: "NotchViewer", dependencies: ["CZlib"], path: "Sources/NotchViewer"),
+        .executableTarget(name: "NotchMirror", path: "Sources/NotchMirror"),
     ]
 )

@@ -1,20 +1,22 @@
 #!/bin/bash
-# Builds NotchViewer.app in the project root.
+# Builds <product>.app (default NotchViewer; or NotchMirror) in the project root.
 set -e
 cd "$(dirname "$0")/.."
+PRODUCT="${1:-NotchViewer}"
+BUNDLE_ID="dev.notchviewer.app"; [ "$PRODUCT" = "NotchMirror" ] && BUNDLE_ID="dev.notchviewer.mirror"
 swift build -c release
-APP=NotchViewer.app
+APP="$PRODUCT.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
-cp .build/release/NotchViewer "$APP/Contents/MacOS/"
+cp ".build/release/$PRODUCT" "$APP/Contents/MacOS/"
 mkdir -p "$APP/Contents/Resources"
 cp assets/AppIcon.icns "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleName</key><string>NotchViewer</string>
-<key>CFBundleIdentifier</key><string>dev.notchviewer.app</string>
-<key>CFBundleExecutable</key><string>NotchViewer</string>
+<key>CFBundleName</key><string>$PRODUCT</string>
+<key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+<key>CFBundleExecutable</key><string>$PRODUCT</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>0.1</string>
