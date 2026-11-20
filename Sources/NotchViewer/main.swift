@@ -90,7 +90,9 @@ final class ViewerWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     var onDisconnect: (() -> Void)?
+    var onCycleColour: (() -> Void)?
     override func sendEvent(_ e: NSEvent) {
+        if e.type == .keyDown, e.modifierFlags.isSuperset(of: [.control, .option, .command]), e.keyCode == 8 { onCycleColour?(); return }
         if e.type == .keyDown, e.modifierFlags.isSuperset(of: [.control, .option, .command]), e.keyCode == 12 { onDisconnect?(); return }
         super.sendEvent(e)
     }
@@ -120,6 +122,20 @@ final class RemoteView: NSView {
     let overlay = NSTextField(labelWithString: "")
     // The shared-surface path left stale pixels on screen, so the image-copy path is the default.
     private let legacyDraw = !UserDefaults.standard.bool(forKey: "fastDraw")
+    private var tempMessage: String?
+    /// Control-Option-Command-C: cycle the colour handling so you can match the 16" by eye.
+    func cycleColour() {
+        let order: [String?] = [nil, "p3", "srgb"]
+        let cur = UserDefaults.standard.string(forKey: "colorSpace")
+        let next = order[((order.firstIndex(of: cur) ?? 0) + 1) % order.count]
+        if let next { UserDefaults.standard.set(next, forKey: "colorSpace") } else { UserDefaults.standard.removeObject(forKey: "colorSpace") }
+        let name = next == "p3" ? "Display P3" : next == "srgb" ? "sRGB" : "Pass-through (default)"
+        if overlay.superview == nil { installOverlay() }
+        tempMessage = "Colour: \(name)\nCtrl-Opt-Cmd-C cycles colour modes"
+        overlay.stringValue = tempMessage!; overlay.isHidden = false
+        refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.tempMessage = nil; self?.overlay.isHidden = true }
+    }
     func installOverlay() {
         overlay.textColor = .white; overlay.backgroundColor = NSColor.black.withAlphaComponent(0.7); overlay.drawsBackground = true
         overlay.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -132,7 +148,8 @@ final class RemoteView: NSView {
         // `defaults write dev.notchviewer.app fastDraw -bool true` tries the experimental shared-surface path.
         let surf: AnyObject? = legacyDraw ? client?.makeImage() : client?.displaySurface
         layer?.contents = surf
-        if let c = client, !overlay.isHidden {
+        if let t = tempMessage { overlay.stringValue = t }
+        else if let c = client, !overlay.isHidden {
             overlay.stringValue = "NotchViewer connected \(c.width)x\(c.height)\nupdates: \(c.updates) rects: \(c.rects) lastEnc: \(c.lastEncoding)\nnon-black samples: \(c.nonBlackSample())  image: \(surf == nil ? "nil" : "ok")\nCtrl-Opt-Cmd-Q disconnects" + (c.nonBlackSample() == 0 && c.updates > 0 ? "\nAll black? Leave Username empty and use the 16\" VNC password." : "")
         }
     }
@@ -391,6 +408,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
         v.onDisconnect = { [weak self] in self?.client?.stop() }
         w.contentView = v
         w.onDisconnect = { [weak self] in self?.client?.stop() }
+        w.onCycleColour = { [weak v] in v?.cycleColour() }
         w.acceptsMouseMovedEvents = true
         v.refresh()
         w.makeKeyAndOrderFront(nil); w.makeFirstResponder(v)
