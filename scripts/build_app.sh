@@ -23,5 +23,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSLocalNetworkUsageDescription</key><string>Connects to your remote Mac over VNC.</string>
 </dict></plist>
 PLIST
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+# A stable signing identity keeps Keychain access ("Always Allow") across rebuilds.
+IDENTITY="${NOTCHVIEWER_SIGN_ID:-NotchViewer Local Signing}"
+if ! codesign --force --sign "$IDENTITY" "$APP" >/dev/null 2>&1; then
+  codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+  echo "note: signed ad-hoc (no '$IDENTITY' identity); Keychain may re-prompt after each rebuild"
+fi
 echo "Built $APP"
