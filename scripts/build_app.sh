@@ -6,6 +6,8 @@ swift build -c release
 APP=NotchViewer.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
 cp .build/release/NotchViewer "$APP/Contents/MacOS/"
+mkdir -p "$APP/Contents/Resources"
+cp assets/AppIcon.icns "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -13,6 +15,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleName</key><string>NotchViewer</string>
 <key>CFBundleIdentifier</key><string>dev.notchviewer.app</string>
 <key>CFBundleExecutable</key><string>NotchViewer</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>0.1</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
