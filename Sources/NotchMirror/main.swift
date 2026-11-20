@@ -60,7 +60,10 @@ final class Capturer: NSObject, SCStreamOutput, SCStreamDelegate {
         DispatchQueue.main.async { self.onFrame?(surf, w, h) }
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) { log("stream stopped: \(error)") }
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        log("stream stopped: \(error)")
+        DispatchQueue.main.async { NSApp.terminate(nil) }   // Screen Sharing closed: give the display back
+    }
 }
 
 final class App: NSObject, NSApplicationDelegate {
@@ -102,12 +105,13 @@ final class App: NSObject, NSApplicationDelegate {
         let v = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
         v.wantsLayer = true
         v.layer?.backgroundColor = NSColor.black.cgColor
-        v.layer?.contentsGravity = .resizeAspectFill    // fill the display; crop is done with contentsRect
+        v.layer?.contentsGravity = .resize              // fill the display; crop is done with contentsRect
         w.contentView = v
         NSApp.presentationOptions = [.hideDock, .hideMenuBar]
         w.setFrame(screen.frame, display: true)
         w.orderFrontRegardless()
         window = w
+        installExit(on: v)
         var cropped = false
         capturer.onFrame = { [weak self, weak v] surf, pw, ph in
             guard let self, let v else { return }
@@ -116,16 +120,55 @@ final class App: NSObject, NSApplicationDelegate {
                 let scale = CGFloat(ph) / win.frame.height
                 let topPx = self.titleBar * scale
                 let contentH = CGFloat(ph) - topPx
-                // Remote picture is letterboxed in the window; keep a centred region with the display's aspect ratio.
-                let target = screen.frame.width / screen.frame.height
-                var cw = contentH * target
-                if cw > CGFloat(pw) { cw = CGFloat(pw) }
-                let x0 = (CGFloat(pw) - cw) / 2
-                // contentsRect is normalised with origin at bottom-left: trim the title bar off the top.
-                v.layer?.contentsRect = CGRect(x: x0 / CGFloat(pw), y: 0, width: cw / CGFloat(pw), height: contentH / CGFloat(ph))
-                log("crop: window \(pw)x\(ph)px, title \(topPx)px, region \(Int(cw))x\(Int(contentH))px")
+                // Find the real picture: black side bars (if any) are trimmed by scanning for non-black columns.
+                var left = 0, right = pw - 1
+                IOSurfaceLock(surf, .readOnly, nil)
+                let base = IOSurfaceGetBaseAddress(surf).assumingMemoryBound(to: UInt8.self)
+                let bpr = IOSurfaceGetBytesPerRow(surf)
+                func colHasContent(_ x: Int) -> Bool {
+                    var y = Int(topPx) + 4
+                    while y < ph - 4 { let o = y * bpr + x * 4; if base[o] | base[o + 1] | base[o + 2] > 6 { return true }; y += 23 }
+                    return false
+                }
+                while left < pw - 1 && !colHasContent(left) { left += 1 }
+                while right > left && !colHasContent(right) { right -= 1 }
+                IOSurfaceUnlock(surf, .readOnly, nil)
+                let cw = CGFloat(right - left + 1)
+                v.layer?.contentsRect = CGRect(x: CGFloat(left) / CGFloat(pw), y: 0, width: cw / CGFloat(pw), height: contentH / CGFloat(ph))
+                log("crop: window \(pw)x\(ph)px, title \(topPx)px, picture x \(left)...\(right), height \(Int(contentH))px")
             }
             v.layer?.contents = surf
+        }
+    }
+}
+
+extension App {
+    /// Safety exits (the mirror ignores the mouse and can't take the keyboard, so it needs its own way out):
+    /// 1. hold the pointer in the bottom-left corner for ~1.2s;  2. NOTCH_TIMEOUT=<seconds> for test runs;
+    /// 3. closing the Screen Sharing connection ends it automatically.
+    func installExit(on v: NSView) {
+        let hint = NSTextField(labelWithString: "Hold the pointer in the bottom-left corner to exit")
+        hint.textColor = .white; hint.backgroundColor = NSColor.black.withAlphaComponent(0.7); hint.drawsBackground = true
+        hint.font = .systemFont(ofSize: 15, weight: .medium); hint.sizeToFit()
+        hint.frame.origin = NSPoint(x: 24, y: 40)
+        v.addSubview(hint)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { hint.removeFromSuperview() }
+
+        var since: Date?
+        NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { _ in
+            let p = NSEvent.mouseLocation
+            if p.x < 10 && p.y < 10 {
+                if since == nil {
+                    since = Date()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        let q = NSEvent.mouseLocation
+                        if let s = since, q.x < 10, q.y < 10, Date().timeIntervalSince(s) >= 1.15 { log("exit: corner"); NSApp.terminate(nil) }
+                    }
+                }
+            } else { since = nil }
+        }
+        if let t = ProcessInfo.processInfo.environment["NOTCH_TIMEOUT"], let sec = Double(t) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + sec) { log("exit: timeout"); NSApp.terminate(nil) }
         }
     }
 }
