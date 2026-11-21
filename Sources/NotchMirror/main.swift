@@ -54,6 +54,7 @@ final class Capturer: NSObject, SCStreamOutput, SCStreamDelegate {
     private let queue = DispatchQueue(label: "notchmirror.capture")
     var onFrame: ((IOSurface, Int, Int) -> Void)?
     private var dumped = false
+    private let started = Date()
 
     func start(window: SCWindow, scale: CGFloat) async throws {
         let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -77,7 +78,7 @@ final class Capturer: NSObject, SCStreamOutput, SCStreamDelegate {
               let pb = CMSampleBufferGetImageBuffer(sb),
               let surf = CVPixelBufferGetIOSurface(pb)?.takeUnretainedValue() else { return }
         let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb)
-        if !dumped {   // one PNG so we can check cropping without screenshots
+        if !dumped && Date().timeIntervalSince(started) > 3 {   // one PNG (after things settle) to check cropping
             dumped = true
             let ci = CIImage(cvPixelBuffer: pb)
             if let cg = CIContext().createCGImage(ci, from: ci.extent) {
@@ -136,10 +137,11 @@ final class App: NSObject, NSApplicationDelegate {
             let aspect = CGFloat(Double(ProcessInfo.processInfo.environment["NOTCH_ASPECT"] ?? "") ?? (3456.0 / 2234.0))
             let screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main!
             let menuH = screen.frame.maxY - screen.visibleFrame.maxY            // menu bar height at the top
-            let availH = screen.frame.height - max(menuH, screen.safeAreaInsets.top) - titleBar
+            let availH = screen.visibleFrame.height - titleBar   // visibleFrame excludes the Dock, which windows can't cover
             var cw = availH * aspect, ch = availH
             if cw > screen.frame.width { cw = screen.frame.width; ch = cw / aspect }
-            if let wins = axAttr(axApp, kAXWindowsAttribute) as? [AXUIElement], let w = wins.first {
+            if let wins = axAttr(axApp, kAXWindowsAttribute) as? [AXUIElement],
+               let w = wins.first(where: { axTitle($0) != "All Connections" && !axTitle($0).isEmpty }) ?? wins.first {
                 axSet(w, size: CGSize(width: cw, height: ch + titleBar), position: CGPoint(x: (screen.frame.width - cw) / 2, y: max(menuH, screen.safeAreaInsets.top)))
                 log("sized Screen Sharing window to \(Int(cw))x\(Int(ch + titleBar)) pt (aspect \(String(format: "%.3f", aspect)))")
             }
