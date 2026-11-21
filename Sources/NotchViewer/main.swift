@@ -350,7 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate, NST
             DispatchQueue.main.async {
                 guard ok else { self.status.stringValue = "Touch ID cancelled."; return }
                 guard let pw = Keychain.load(acct) else { self.status.stringValue = "macOS didn\u{2019}t release the saved login (choose Always Allow when it asks). Type the password and press Connect."; return }
-                self.pendingPassword = nil
+                self.pendingPassword = pw   // re-save under the current address list once connected
                 self.startConnection(password: pw)
             }
         }
@@ -374,6 +374,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate, NST
 
     private func startConnection(password: String) {
         let host = hostField.stringValue.trimmingCharacters(in: .whitespaces)
+        // Remember the address list and username for next launch, whichever way we connected (button or Touch ID).
+        UserDefaults.standard.set(host, forKey: "host")
+        UserDefaults.standard.set(userField.stringValue, forKey: "user")
         status.stringValue = ""; button.isEnabled = false; touchButton.isEnabled = false; button.title = "Linking…"
         setLinking("Linking to \(host)…")
         lastPassword = password

@@ -90,6 +90,9 @@ final class RFBClient {
         guard !candidates.isEmpty else { throw RFBError("Enter the remote Mac's address") }
         let seconds = candidates.count > 1 ? 3 : 10
         for cand in candidates {
+            // At home: the home address is on one of this Mac's networks. Away: it isn't, so skip it
+            // immediately instead of waiting (or reaching some other network's device) and go to Tailscale.
+            if candidates.count > 1 && !isOnLocalNetwork(cand) { Log.write("skipping \(cand): not on a network this Mac is on"); continue }
             let isTailscale = cand.hasPrefix("100.")
             for attempt in 0..<(isTailscale ? 2 : 1) {
                 if attempt == 1 {
@@ -103,6 +106,29 @@ final class RFBClient {
             Log.write("no answer from \(cand)")
         }
         throw RFBError("Could not reach \(host) - is the other Mac awake and online (Wi-Fi or Tailscale)?")
+    }
+
+    /// True unless `cand` is a private LAN address (192.168.x.x, 10.x, 172.16-31.x) that this Mac has no interface for.
+    private func isOnLocalNetwork(_ cand: String) -> Bool {
+        let parts = cand.split(separator: ".").compactMap { UInt32($0) }
+        guard parts.count == 4, parts.allSatisfy({ $0 < 256 }) else { return true }   // a name: just try it
+        let isPrivate = parts[0] == 10 || (parts[0] == 172 && (16...31).contains(parts[1])) || (parts[0] == 192 && parts[1] == 168)
+        guard isPrivate else { return true }
+        let c = parts[0] << 24 | parts[1] << 16 | parts[2] << 8 | parts[3]
+        var ifap: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifap) == 0 else { return true }
+        defer { freeifaddrs(ifap) }
+        var p = ifap
+        while let i = p {
+            if let a = i.pointee.ifa_addr, let m = i.pointee.ifa_netmask, a.pointee.sa_family == UInt8(AF_INET),
+               i.pointee.ifa_flags & UInt32(IFF_UP) != 0 {
+                let ip = a.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+                let mask = m.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+                if ip >> 24 != 127 && ip & mask == c & mask { return true }
+            }
+            p = i.pointee.ifa_next
+        }
+        return false
     }
 
     private func tryConnect(_ cand: String, port: String, seconds: Int) -> Bool {
