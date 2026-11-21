@@ -13,6 +13,36 @@ func log(_ s: String) {
     print(s)
 }
 
+// MARK: Accessibility helpers (drive Screen Sharing's window and View menu)
+
+func axAttr(_ e: AXUIElement, _ name: String) -> CFTypeRef? {
+    var v: CFTypeRef?
+    return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
+}
+func axTitle(_ e: AXUIElement) -> String { (axAttr(e, kAXTitleAttribute) as? String) ?? "" }
+func axChildren(_ e: AXUIElement) -> [AXUIElement] { (axAttr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] }
+
+/// Items of a top-level menu (e.g. "View") of the app, as (title, element).
+func axMenuItems(_ app: AXUIElement, menu: String) -> [(String, AXUIElement)] {
+    guard let mb = axAttr(app, kAXMenuBarAttribute) else { return [] }
+    for top in axChildren(mb as! AXUIElement) where axTitle(top) == menu {
+        return axChildren(top).flatMap { axChildren($0) }.map { (axTitle($0), $0) }
+    }
+    return []
+}
+
+/// Presses a menu item if it exists (returns false when the title isn't there, e.g. already in that state).
+@discardableResult func axPressMenu(_ app: AXUIElement, menu: String, title: String) -> Bool {
+    guard let item = axMenuItems(app, menu: menu).first(where: { $0.0 == title })?.1 else { return false }
+    return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+}
+
+func axSet(_ w: AXUIElement, size: CGSize, position: CGPoint) {
+    var sz = size, pos = position
+    if let sv = AXValueCreate(.cgSize, &sz) { AXUIElementSetAttributeValue(w, kAXSizeAttribute as CFString, sv) }
+    if let pv = AXValueCreate(.cgPoint, &pos) { AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, pv) }
+}
+
 final class MirrorWindow: NSWindow {
     override var canBecomeKey: Bool { false }   // never steal keyboard focus from Screen Sharing
     override var canBecomeMain: Bool { false }
@@ -85,14 +115,45 @@ final class App: NSObject, NSApplicationDelegate {
 
     func run() async {
         do {
+            // 1. Accessibility lets us set Screen Sharing up so its picture is exactly the other Mac's screen.
+            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            guard AXIsProcessTrustedWithOptions(opts) else {
+                log("Accessibility permission needed: System Settings > Privacy & Security > Accessibility (Device Control...), enable NotchMirror, then reopen it.")
+                await MainActor.run { NSApp.terminate(nil) }; return
+            }
+            guard let ss = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.ScreenSharing").first else {
+                log("Screen Sharing isn't running. Open it and connect to the other Mac first."); await MainActor.run { NSApp.terminate(nil) }; return
+            }
+            let axApp = AXUIElementCreateApplication(ss.processIdentifier)
+            let items = axMenuItems(axApp, menu: "View").map { $0.0 }
+            log("View menu: \(items.filter { $0.contains("Scaling") || $0.contains("Toolbar") || $0.contains("Full Screen") })")
+            if items.contains("Exit Full Screen") { axPressMenu(axApp, menu: "View", title: "Exit Full Screen"); try await Task.sleep(nanoseconds: 1_200_000_000) }
+            axPressMenu(axApp, menu: "View", title: "Turn Scaling On")   // only present when scaling is off
+            axPressMenu(axApp, menu: "View", title: "Hide Toolbar")
+            try await Task.sleep(nanoseconds: 500_000_000)
+
+            // 2. Size the window so its picture area has the other Mac's aspect ratio (no bars, nothing cropped).
+            let aspect = CGFloat(Double(ProcessInfo.processInfo.environment["NOTCH_ASPECT"] ?? "") ?? (3456.0 / 2234.0))
+            let screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main!
+            let menuH = screen.frame.maxY - screen.visibleFrame.maxY            // menu bar height at the top
+            let availH = screen.frame.height - max(menuH, screen.safeAreaInsets.top) - titleBar
+            var cw = availH * aspect, ch = availH
+            if cw > screen.frame.width { cw = screen.frame.width; ch = cw / aspect }
+            if let wins = axAttr(axApp, kAXWindowsAttribute) as? [AXUIElement], let w = wins.first {
+                axSet(w, size: CGSize(width: cw, height: ch + titleBar), position: CGPoint(x: (screen.frame.width - cw) / 2, y: max(menuH, screen.safeAreaInsets.top)))
+                log("sized Screen Sharing window to \(Int(cw))x\(Int(ch + titleBar)) pt (aspect \(String(format: "%.3f", aspect)))")
+            }
+            try await Task.sleep(nanoseconds: 800_000_000)
+
+            // 3. Capture it.
             let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
             let wins = content.windows.filter { $0.owningApplication?.bundleIdentifier == "com.apple.ScreenSharing" && $0.frame.width > 600 }
             guard let win = wins.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else {
-                log("No Screen Sharing window found. Open Screen Sharing and connect to the other Mac first."); NSApp.terminate(nil); return
+                log("No Screen Sharing window found. Open Screen Sharing and connect to the other Mac first."); await MainActor.run { NSApp.terminate(nil) }; return
             }
             await MainActor.run { self.show(for: win) }
             try await capturer.start(window: win, scale: NSScreen.main?.backingScaleFactor ?? 2)
-        } catch { log("error: \(error)"); NSApp.terminate(nil) }
+        } catch { log("error: \(error)"); await MainActor.run { NSApp.terminate(nil) } }
     }
 
     @MainActor func show(for win: SCWindow) {
