@@ -62,6 +62,8 @@ so macOS will warn the first time: right-click the app, choose **Open**.
 `192.168.1.20, 100.64.0.5` (home Wi-Fi address first, then the other Mac's [Tailscale](https://tailscale.com)
 address). NotchViewer uses the first one that answers, so at home it connects directly and anywhere else it goes
 through Tailscale, starting the Tailscale app if needed. The saved login (and Touch ID) covers the whole list.
+The start screen shows which route applies right now (at home, or away via Tailscale) and whether the other Mac is
+answering.
 
 Two optional settings (Terminal):
 

@@ -237,6 +237,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate, NST
             spinner.stopAnimation(nil); linkRow.isHidden = true
         }
     }
+    private let routeLabel = NSTextField(labelWithString: "")
+    private var warmedTailscale = false
+    private var probeToken = 0
+
+    /// Shows which route will be used right now (home Wi-Fi or Tailscale) and whether the other Mac answers.
+    private func updateRoute() {
+        let cands = hostField.stringValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard let r = RFBClient.route(for: cands) else {
+            routeLabel.attributedStringValue = NSAttributedString(string: cands.isEmpty ? "" : "No address on this network. Add the Tailscale address.",
+                attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: NSFont.systemFont(ofSize: 12)])
+            return
+        }
+        let title = r.kind == "Home Wi-Fi" ? "At home: Home Wi-Fi" : r.kind == "Tailscale" ? "Away: via Tailscale" : "Direct"
+        func show(_ dot: NSColor, _ tail: String) {
+            let a = NSMutableAttributedString(string: "\u{25CF} ", attributes: [.foregroundColor: dot, .font: NSFont.systemFont(ofSize: 12)])
+            a.append(NSAttributedString(string: "\(title) · \(r.addr)\(tail)", attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: NSFont.systemFont(ofSize: 12)]))
+            routeLabel.attributedStringValue = a
+        }
+        show(.systemGray, " · checking…")
+        if r.kind == "Tailscale" && !warmedTailscale {   // make sure Tailscale is up before we need it
+            warmedTailscale = true
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/open"); p.arguments = ["-g", "-a", "Tailscale"]
+            try? p.run()
+        }
+        probeToken += 1; let token = probeToken
+        DispatchQueue.global().async {
+            let ok = RFBClient.probe(r.addr)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, token == self.probeToken else { return }
+                if ok { show(.systemGreen, " · Mac is online") } else { show(.systemOrange, " · Mac isn\u{2019}t answering (asleep or offline?)") }
+            }
+        }
+    }
+
     private var pendingPassword: String?
     private var lastPassword = ""
     private var retries = 0
@@ -250,12 +284,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate, NST
         NSApp.setActivationPolicy(.regular)
         buildConnectWindow()
         NSApp.activate(ignoringOtherApps: true)
+        // Re-check the route every few seconds while the start screen is showing (you may have changed network).
+        Timer.scheduledTimer(withTimeInterval: 6, repeats: true) { [weak self] _ in
+            guard let self, self.client == nil, self.connectWindow.isVisible else { return }
+            self.updateRoute()
+        }
         if !touchButton.isHidden { touchConnect() } // saved login: ask for Touch ID straight away
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
 
     private func buildConnectWindow() {
-        connectWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 480),
+        connectWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 500),
                                  styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         connectWindow.titlebarAppearsTransparent = true
         connectWindow.titleVisibility = .hidden
@@ -302,7 +341,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate, NST
 
         let header = NSStackView(views: [icon, title, sub])
         header.orientation = .vertical; header.spacing = 4; header.alignment = .centerX
-        let stack = NSStackView(views: [header, hostField, userField, passField, remember, status, linkRow, touchButton, button, forgetButton])
+        let stack = NSStackView(views: [header, hostField, routeLabel, userField, passField, remember, status, linkRow, touchButton, button, forgetButton])
         stack.orientation = .vertical; stack.alignment = .centerX; stack.spacing = 12
         stack.setCustomSpacing(22, after: header)
         stack.edgeInsets = NSEdgeInsets(top: 44, left: 40, bottom: 24, right: 40)
@@ -338,6 +377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate, NST
     func controlTextDidChange(_ obj: Notification) { refreshSaved() }
 
     private func refreshSaved() {
+        updateRoute()
         let has = !hostField.stringValue.isEmpty && savedAccount() != nil
         touchButton.isHidden = !has; forgetButton.isHidden = !has
         if has { touchButton.keyEquivalent = "\r"; button.keyEquivalent = "" } else { button.keyEquivalent = "\r" }

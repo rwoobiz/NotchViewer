@@ -92,7 +92,7 @@ final class RFBClient {
         for cand in candidates {
             // At home: the home address is on one of this Mac's networks. Away: it isn't, so skip it
             // immediately instead of waiting (or reaching some other network's device) and go to Tailscale.
-            if candidates.count > 1 && !isOnLocalNetwork(cand) { Log.write("skipping \(cand): not on a network this Mac is on"); continue }
+            if candidates.count > 1 && !RFBClient.isOnLocalNetwork(cand) { Log.write("skipping \(cand): not on a network this Mac is on"); continue }
             let isTailscale = cand.hasPrefix("100.")
             for attempt in 0..<(isTailscale ? 2 : 1) {
                 if attempt == 1 {
@@ -109,7 +109,13 @@ final class RFBClient {
     }
 
     /// True unless `cand` is a private LAN address (192.168.x.x, 10.x, 172.16-31.x) that this Mac has no interface for.
-    private func isOnLocalNetwork(_ cand: String) -> Bool {
+    static func isPrivateLAN(_ cand: String) -> Bool {
+        let p = cand.split(separator: ".").compactMap { UInt32($0) }
+        guard p.count == 4, p.allSatisfy({ $0 < 256 }) else { return false }
+        return p[0] == 10 || (p[0] == 172 && (16...31).contains(p[1])) || (p[0] == 192 && p[1] == 168)
+    }
+
+    static func isOnLocalNetwork(_ cand: String) -> Bool {
         let parts = cand.split(separator: ".").compactMap { UInt32($0) }
         guard parts.count == 4, parts.allSatisfy({ $0 < 256 }) else { return true }   // a name: just try it
         let isPrivate = parts[0] == 10 || (parts[0] == 172 && (16...31).contains(parts[1])) || (parts[0] == 192 && parts[1] == 168)
@@ -131,6 +137,38 @@ final class RFBClient {
         return false
     }
 
+    /// Which route applies right now: the first listed address this Mac can reach directly (home network),
+    /// otherwise the first non-LAN one (Tailscale or a public name).
+    static func route(for cands: [String]) -> (kind: String, addr: String)? {
+        for c in cands {
+            if isPrivateLAN(c) {
+                if isOnLocalNetwork(c) { return ("Home Wi-Fi", c) }
+            } else {
+                return (c.hasPrefix("100.") ? "Tailscale" : "Direct", c)
+            }
+        }
+        return nil
+    }
+
+    /// Quick "is the other Mac answering?" check.
+    static func probe(_ host: String, port: String = "5900", seconds: Int = 2) -> Bool {
+        var hints = addrinfo(); hints.ai_socktype = SOCK_STREAM
+        var res: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, port, &hints, &res) == 0, let first = res else { return false }
+        defer { freeaddrinfo(res) }
+        var p: UnsafeMutablePointer<addrinfo>? = first
+        while let ai = p {
+            let s = socket(ai.pointee.ai_family, ai.pointee.ai_socktype, ai.pointee.ai_protocol)
+            if s >= 0 {
+                let ok = connectWithTimeout(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen, seconds: seconds)
+                close(s)
+                if ok { return true }
+            }
+            p = ai.pointee.ai_next
+        }
+        return false
+    }
+
     private func tryConnect(_ cand: String, port: String, seconds: Int) -> Bool {
         var hints = addrinfo(); hints.ai_socktype = SOCK_STREAM
         var res: UnsafeMutablePointer<addrinfo>?
@@ -140,7 +178,7 @@ final class RFBClient {
         while let ai = p {
             let s = socket(ai.pointee.ai_family, ai.pointee.ai_socktype, ai.pointee.ai_protocol)
             if s >= 0 {
-                if connectWithTimeout(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen, seconds: seconds) {
+                if RFBClient.connectWithTimeout(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen, seconds: seconds) {
                     var one: Int32 = 1
                     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
                     fd = s
@@ -154,7 +192,7 @@ final class RFBClient {
         return false
     }
 
-    private func connectWithTimeout(_ s: Int32, _ addr: UnsafePointer<sockaddr>, _ len: socklen_t, seconds: Int) -> Bool {
+    static func connectWithTimeout(_ s: Int32, _ addr: UnsafePointer<sockaddr>, _ len: socklen_t, seconds: Int) -> Bool {
         let flags = fcntl(s, F_GETFL)
         _ = fcntl(s, F_SETFL, flags | O_NONBLOCK)
         var r = Darwin.connect(s, addr, len)
