@@ -43,7 +43,8 @@ enum Keychain {
     static func load(_ account: String) -> String? {
         var q = query(account); q[kSecReturnData as String] = true
         var out: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
+        let st = SecItemCopyMatching(q as CFDictionary, &out)
+        guard st == errSecSuccess, let d = out as? Data else { Log.write("keychain read failed: status \(st)"); return nil }
         return String(data: d, encoding: .utf8)
     }
     static func delete(_ account: String) { SecItemDelete(query(account) as CFDictionary) }
@@ -336,7 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
         ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Connect to your remote Mac") { ok, err in
             DispatchQueue.main.async {
                 guard ok else { self.status.stringValue = "Touch ID cancelled."; return }
-                guard let pw = Keychain.load(acct) else { self.status.stringValue = "Saved login not found - enter it again."; return }
+                guard let pw = Keychain.load(acct) else { self.status.stringValue = "macOS didn\u{2019}t release the saved login (choose Always Allow when it asks). Type the password and press Connect."; return }
                 self.pendingPassword = nil
                 self.startConnection(password: pw)
             }
