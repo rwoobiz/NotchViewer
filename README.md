@@ -81,18 +81,10 @@ defaults write dev.notchviewer.app fastDraw -bool true   # experimental GPU-surf
 - No clipboard sync, no multiple displays, no remote cursor shape.
 - Colours are 8-bit with no profile attached; use the colour modes to match by eye.
 
-## NotchMirror (experiment)
-
-`Sources/NotchMirror` is an unfinished experiment that mirrors Apple's own Screen Sharing window across the
-notch row using ScreenCaptureKit, which would bring Apple's speed, colour and sound. It needs Screen Recording
-and Accessibility permission, and pointer alignment is not solved, so it is **not** part of the supported app.
-It quits when you hold the pointer in the bottom-left corner.
-
 ## Project layout
 
 ```
 Sources/NotchViewer   the viewer (RFB client, ARD/VNC auth, ZRLE decoder, AppKit UI)
-Sources/NotchMirror   experiment, see above
 Sources/CZlib         tiny zlib shim for ZRLE
 scripts/              build_app.sh, make_dmg.sh, make_icon.swift
 ```

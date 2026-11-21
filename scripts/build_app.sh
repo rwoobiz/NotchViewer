@@ -1,9 +1,9 @@
 #!/bin/bash
-# Builds <product>.app (default NotchViewer; or NotchMirror) in the project root.
+# Builds NotchViewer.app in the project root.
 set -e
 cd "$(dirname "$0")/.."
-PRODUCT="${1:-NotchViewer}"
-BUNDLE_ID="dev.notchviewer.app"; [ "$PRODUCT" = "NotchMirror" ] && BUNDLE_ID="dev.notchviewer.mirror"
+PRODUCT="NotchViewer"
+BUNDLE_ID="dev.notchviewer.app"
 swift build -c release
 APP="$PRODUCT.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
