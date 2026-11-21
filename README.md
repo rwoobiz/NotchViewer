@@ -9,6 +9,8 @@ shows the other Mac's menu bar *under* the notch row. NotchViewer is a small VNC
 remote screen over the **entire** built-in display. The remote menu bar sits right beside the camera, as if
 you were sitting at the other Mac.
 
+<p align="center"><img src="assets/before-after.png" alt="Apple Screen Sharing keeps the remote menu bar below the camera row; NotchViewer puts it beside the camera" width="780"></p>
+
 > **Status: early MVP (v0.1).** Built and tested on one pair of MacBook Pros (a 14" viewing a 16").
 > Expect rough edges, and please open an issue with what you find.
 
