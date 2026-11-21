@@ -273,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
         let sub = NSTextField(labelWithString: "Your other Mac, edge to edge.")
         sub.textColor = .secondaryLabelColor
 
-        hostField.placeholderString = "Remote Mac address, e.g. 192.168.1.20"
+        hostField.placeholderString = "Address(es), e.g. 192.168.1.20, 100.x.x.x"
         userField.placeholderString = "Username (blank for VNC password)"
         userField.placeholderString = "Username on the remote Mac (blank = VNC password)"
         passField.placeholderString = "Password"

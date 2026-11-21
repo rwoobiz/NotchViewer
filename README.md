@@ -58,6 +58,11 @@ so macOS will warn the first time: right-click the app, choose **Open**.
 3. Connect. Press **Control-Option-Command-Q** to disconnect.
 4. **Control-Option-Command-C** cycles the colour mode while connected.
 
+**Home and away:** enter more than one address, separated by commas, for example
+`192.168.1.20, 100.64.0.5` (home Wi-Fi address first, then the other Mac's [Tailscale](https://tailscale.com)
+address). NotchViewer uses the first one that answers, so at home it connects directly and anywhere else it goes
+through Tailscale, starting the Tailscale app if needed. The saved login (and Touch ID) covers the whole list.
+
 Two optional settings (Terminal):
 
 ```bash

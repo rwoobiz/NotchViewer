@@ -82,25 +82,66 @@ final class RFBClient {
 
     // MARK: socket helpers
 
+    /// Tries each comma-separated address in order (for example "192.168.1.20, 100.64.0.5": home Wi-Fi, then Tailscale)
+    /// and uses the first one that answers. A 100.x address is a Tailscale one: if it doesn't answer we start the
+    /// Tailscale app and try once more, so being away from home "just works".
     private func openSocket(host: String, port: String) throws {
+        let candidates = host.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard !candidates.isEmpty else { throw RFBError("Enter the remote Mac's address") }
+        let seconds = candidates.count > 1 ? 3 : 10
+        for cand in candidates {
+            let isTailscale = cand.hasPrefix("100.")
+            for attempt in 0..<(isTailscale ? 2 : 1) {
+                if attempt == 1 {
+                    Log.write("starting Tailscale and retrying \(cand)")
+                    let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/open"); p.arguments = ["-g", "-a", "Tailscale"]
+                    try? p.run(); p.waitUntilExit()
+                    Thread.sleep(forTimeInterval: 5)
+                }
+                if tryConnect(cand, port: port, seconds: attempt == 1 ? 6 : seconds) { return }
+            }
+            Log.write("no answer from \(cand)")
+        }
+        throw RFBError("Could not reach \(host) - is the other Mac awake and online (Wi-Fi or Tailscale)?")
+    }
+
+    private func tryConnect(_ cand: String, port: String, seconds: Int) -> Bool {
         var hints = addrinfo(); hints.ai_socktype = SOCK_STREAM
         var res: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, port, &hints, &res) == 0, let first = res else { throw RFBError("Cannot resolve \(host)") }
+        guard getaddrinfo(cand, port, &hints, &res) == 0, let first = res else { Log.write("cannot resolve \(cand)"); return false }
         defer { freeaddrinfo(res) }
         var p: UnsafeMutablePointer<addrinfo>? = first
         while let ai = p {
             let s = socket(ai.pointee.ai_family, ai.pointee.ai_socktype, ai.pointee.ai_protocol)
             if s >= 0 {
-                if Darwin.connect(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen) == 0 {
+                if connectWithTimeout(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen, seconds: seconds) {
                     var one: Int32 = 1
                     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
-                    fd = s; return
+                    fd = s
+                    Log.write("connected via \(cand)")
+                    return true
                 }
                 close(s)
             }
             p = ai.pointee.ai_next
         }
-        throw RFBError("Could not connect to \(host):\(port)")
+        return false
+    }
+
+    private func connectWithTimeout(_ s: Int32, _ addr: UnsafePointer<sockaddr>, _ len: socklen_t, seconds: Int) -> Bool {
+        let flags = fcntl(s, F_GETFL)
+        _ = fcntl(s, F_SETFL, flags | O_NONBLOCK)
+        var r = Darwin.connect(s, addr, len)
+        if r != 0 && errno == EINPROGRESS {
+            var pfd = pollfd(fd: s, events: Int16(POLLOUT), revents: 0)
+            if poll(&pfd, 1, Int32(seconds * 1000)) > 0 {
+                var err: Int32 = 0; var l = socklen_t(MemoryLayout<Int32>.size)
+                getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &l)
+                r = err == 0 ? 0 : -1
+            } else { r = -1 }
+        }
+        _ = fcntl(s, F_SETFL, flags)
+        return r == 0
     }
 
     private func read(_ n: Int) throws -> [UInt8] {
