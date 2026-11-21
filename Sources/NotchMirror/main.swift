@@ -118,7 +118,9 @@ final class App: NSObject, NSApplicationDelegate {
             if !cropped {
                 cropped = true
                 let scale = CGFloat(ph) / win.frame.height
-                let topPx = self.titleBar * scale
+                // Full-screen Screen Sharing has no title bar; a normal window has ~32pt of it.
+                let isFull = win.frame.height >= screen.frame.height - screen.safeAreaInsets.top - 4
+                let topPx = (isFull ? 0 : self.titleBar) * scale
                 let contentH = CGFloat(ph) - topPx
                 // Find the real picture: black side bars (if any) are trimmed by scanning for non-black columns.
                 var left = 0, right = pw - 1
