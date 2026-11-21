@@ -210,7 +210,7 @@ final class RemoteView: NSView {
 
 // MARK: app
 
-final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate, NSTextFieldDelegate {
     private var connectWindow: NSWindow!
     private let hostField = NSTextField(string: UserDefaults.standard.string(forKey: "host") ?? "")
     private let userField = NSTextField(string: UserDefaults.standard.string(forKey: "user") ?? "")
@@ -274,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
         let sub = NSTextField(labelWithString: "Your other Mac, edge to edge.")
         sub.textColor = .secondaryLabelColor
 
+        hostField.delegate = self; userField.delegate = self
         hostField.placeholderString = "Address(es), e.g. 192.168.1.20, 100.x.x.x"
         userField.placeholderString = "Username (blank for VNC password)"
         userField.placeholderString = "Username on the remote Mac (blank = VNC password)"
@@ -283,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
             f.widthAnchor.constraint(equalToConstant: 320).isActive = true
         }
         remember.controlSize = .small
-        status.textColor = .systemRed; status.lineBreakMode = .byWordWrapping; status.maximumNumberOfLines = 2
+        status.textColor = .systemRed; status.lineBreakMode = .byWordWrapping; status.maximumNumberOfLines = 4
         status.font = .systemFont(ofSize: 12)
         status.widthAnchor.constraint(equalToConstant: 320).isActive = true
 
@@ -325,14 +326,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
         refreshSaved()
     }
 
+    /// The saved login to use for the current fields: the exact address list, else the same user at any one of the
+    /// addresses (so a login saved for the home address also works once you add the Tailscale one).
+    private func savedAccount() -> String? {
+        let user = userField.stringValue
+        let addrs = hostField.stringValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        for a in [account] + addrs.map({ "\(user)@\($0)" }) where Keychain.exists(a) { return a }
+        return nil
+    }
+
+    func controlTextDidChange(_ obj: Notification) { refreshSaved() }
+
     private func refreshSaved() {
-        let has = !hostField.stringValue.isEmpty && Keychain.exists(account)
+        let has = !hostField.stringValue.isEmpty && savedAccount() != nil
         touchButton.isHidden = !has; forgetButton.isHidden = !has
         if has { touchButton.keyEquivalent = "\r"; button.keyEquivalent = "" } else { button.keyEquivalent = "\r" }
     }
 
     @objc private func touchConnect() {
-        let acct = account
+        let acct = savedAccount() ?? account
         let ctx = LAContext()
         ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Connect to your remote Mac") { ok, err in
             DispatchQueue.main.async {
@@ -345,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RFBClientDelegate {
     }
 
     @objc private func forget() {
-        Keychain.delete(account); passField.stringValue = ""; refreshSaved()
+        if let a = savedAccount() { Keychain.delete(a) }; Keychain.delete(account); passField.stringValue = ""; refreshSaved()
         status.stringValue = "Saved login removed."
     }
 
