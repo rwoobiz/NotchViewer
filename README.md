@@ -2,11 +2,11 @@
 
 # NotchViewer
 
-**Your other Mac, edge to edge, camera row included.**
+**Mac to Mac, edge to edge, camera row included.**
 
 ## The pain point
 
-Apple's Screen Sharing never maps the other Mac to your **full** screen. On a notched MacBook, macOS keeps its
+Apple's Screen Sharing never maps the other Mac to your **full** screen. On every notched MacBook, macOS keeps its
 window (even in full screen) below the camera housing, so the notch row is left empty and the remote Mac's menu
 bar and picture are pushed down and squeezed. You are looking at a smaller, shifted copy of the other Mac, not the
 whole screen.
@@ -17,12 +17,15 @@ the other Mac. **That is where the name comes from: it's a viewer built around t
 
 <p align="center"><img src="assets/before-after.png" alt="Apple Screen Sharing keeps the remote menu bar below the camera row; NotchViewer puts it beside the camera" width="780"></p>
 
-> **Status: early MVP (v0.1).** Built and tested on one pair of MacBook Pros (a 14" viewing a 16").
+> **Status: early release (v0.2).** Meant for any notched MacBook viewing any Mac that has Screen Sharing on. So far
+> it has been tested on one pair of MacBook Pros only.
 > Expect rough edges, and please open an issue with what you find.
 
 ## Features
 
 - Full-display remote screen, including the notch row
+- **Home and away:** at home it connects over your network, away it goes through Tailscale automatically, and the
+  start screen shows which route is active and whether the other Mac is answering
 - Liquid-glass connect window, with a morphing transition into the remote view
 - **Touch ID unlock**: save the login once (Keychain), then just touch the sensor
 - ZRLE-compressed updates (falls back to Raw automatically if a connection misbehaves)
