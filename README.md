@@ -4,10 +4,16 @@
 
 **Your other Mac, edge to edge, camera row included.**
 
-On a MacBook with a notch, macOS keeps every window below the camera housing, so Apple's Screen Sharing
-shows the other Mac's menu bar *under* the notch row. NotchViewer is a small VNC viewer that draws the
-remote screen over the **entire** built-in display. The remote menu bar sits right beside the camera, as if
-you were sitting at the other Mac.
+## The pain point
+
+Apple's Screen Sharing never maps the other Mac to your **full** screen. On a notched MacBook, macOS keeps its
+window (even in full screen) below the camera housing, so the notch row is left empty and the remote Mac's menu
+bar and picture are pushed down and squeezed. You are looking at a smaller, shifted copy of the other Mac, not the
+whole screen.
+
+NotchViewer fixes that. It is a small VNC viewer that draws the remote screen over the **entire** built-in
+display, utilising the notch row, so the remote menu bar sits right beside the camera, as if you were sitting at
+the other Mac. **That is where the name comes from: it's a viewer built around the notch.**
 
 <p align="center"><img src="assets/before-after.png" alt="Apple Screen Sharing keeps the remote menu bar below the camera row; NotchViewer puts it beside the camera" width="780"></p>
 
